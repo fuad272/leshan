@@ -100,6 +100,7 @@ From your Mac/PC (replace <PI_IP> with the Pi's IP address, e.g. 10.30.32.227):
        pi@<PI_IP>:/home/pi/
 
    scp sensehat_joystick.py  pi@<PI_IP>:/home/pi/
+   scp sensehat_lamp.py      pi@<PI_IP>:/home/pi/
 
 --- Start the server on your Mac/PC ---
 
@@ -127,9 +128,26 @@ The client will print:
 1. Open the Leshan Web UI at http://<MAC_IP>:8080/
 2. "presencePi" should appear in the client list.
 3. Press the Sense HAT middle button → presence toggles true/false.
-4. Luminaire clients (lum1, lum2 …) will turn on/off automatically.
+4. Luminaire clients (lum1, lum2 …) will turn on/off automatically,
+   and the Sense HAT LED matrix on the Pi will light up/dim/turn off.
 5. Change the Demand Response "Total Allowed Peak Room Power" value in the
-   UI → luminaire dim levels update automatically.
+   UI → luminaire dim levels update automatically and the LED brightness
+   changes accordingly.
+
+--- Start the Luminaire client on the Pi ---
+
+SSH into the Pi and run (replace <MAC_IP> with your server's IP):
+
+   cd /home/pi
+   java -jar leshan-client-demo-2.0.0-SNAPSHOT-jar-with-dependencies.jar \
+        -n lumPi -luminaire -u coap://<MAC_IP>:5683
+
+When sensehat_lamp.py is present in the working directory and the
+sense-hat Python library is installed, the Sense HAT LED matrix will
+automatically reflect the luminaire state:
+  - Power ON  → full 8x8 matrix lit at the current dim brightness.
+  - Power OFF → matrix cleared.
+  - Dim level changed while ON → matrix brightness updated (0 = dark, 100 = full white).
 
 --- Firewall notes ---
 
