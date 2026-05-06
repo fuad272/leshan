@@ -3,6 +3,10 @@
  ****************/
 package org.eclipse.leshan.client.demo;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Random;
@@ -63,22 +67,117 @@ public class Luminaire extends BaseInstanceEnabler {
     // 0..100
     private long vDimLevel = 0;
 
-    //
-    // 2IMN15:  TODO  :  fill in
-    //
-    // Add state variables for the user interface.
-    
-    public Luminaire() {
-	//
-	// 2IMN15:  TODO  :  fill in
-	//
-	// Create an interface to display the luminaire state.
-	// Options:
-	// *  GUI     (see DemandResponse.java for an Swing/AWT example)
-	// *  external application
-	// *  ...
-	//
+    // Sense HAT lamp process (null when not running on a Pi with the script).
+    private Process senseHatProcess;
+    private BufferedWriter senseHatWriter;
 
+    public Luminaire() {
+        // 2IMN15: Start Sense HAT LED controller if the helper script is present.
+        startSenseHatLamp();
+
+        // Ensure the background process is cleaned up on JVM exit.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            if (senseHatProcess != null) {
+                try {
+                    if (senseHatWriter != null) senseHatWriter.close();
+                } catch (IOException ignored) {}
+                senseHatProcess.destroy();
+            }
+        }, "luminaire-shutdown"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Sense HAT LED helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Try to start the Sense HAT Python helper script.
+     * Looks for "sensehat_lamp.py" in the current working directory.
+     * Logs a warning and falls back silently when the script is absent or the
+     * sense_hat library is not installed (non-Pi platforms).
+     */
+    private void startSenseHatLamp() {
+        File script = new File("sensehat_lamp.py");
+        if (!script.exists()) {
+            System.out.println("[Luminaire] sensehat_lamp.py not found – LED matrix output disabled.");
+            return;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder("python3", script.getAbsolutePath());
+            pb.redirectErrorStream(true);  // merge stderr into stdout to avoid buffer fill
+            senseHatProcess = pb.start();
+
+            final java.io.InputStream lampOut = senseHatProcess.getInputStream();
+
+            // Read the first line (expect "READY") with a short timeout.
+            java.util.concurrent.ExecutorService exec =
+                    java.util.concurrent.Executors.newSingleThreadExecutor();
+            java.util.concurrent.Future<String> firstLine = exec.submit(
+                    () -> new java.io.BufferedReader(new java.io.InputStreamReader(lampOut)).readLine());
+            exec.shutdown();
+
+            String ready;
+            try {
+                ready = firstLine.get(3, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) {
+                firstLine.cancel(true);
+                exec.shutdownNow();
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+                System.err.println("[Luminaire] Sense HAT script did not become ready: " + e.getMessage());
+                return;
+            }
+
+            if (!"READY".equals(ready)) {
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+                System.err.println("[Luminaire] Sense HAT script sent unexpected first line: " + ready);
+                return;
+            }
+
+            // Drain remaining stdout in background to prevent pipe buffer blockage.
+            Thread drainer = new Thread(() -> {
+                byte[] buf = new byte[512];
+                try { while (lampOut.read(buf) != -1) {} } catch (IOException ignored) {}
+            }, "lamp-stdout-drainer");
+            drainer.setDaemon(true);
+            drainer.start();
+
+            if (!"READY".equals(ready)) {
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+                System.err.println("[Luminaire] Sense HAT script sent unexpected first line: " + ready);
+                return;
+            }
+
+            senseHatWriter = new BufferedWriter(
+                    new OutputStreamWriter(senseHatProcess.getOutputStream()));
+            System.out.println("[Luminaire] Sense HAT LED matrix active.");
+
+        } catch (IOException e) {
+            System.err.println("[Luminaire] Could not start sensehat_lamp.py: " + e.getMessage());
+            if (senseHatProcess != null) {
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+            }
+        }
+    }
+
+    /**
+     * Send a command to the Sense HAT lamp script.
+     * Commands: "off", "on <dim>" where dim is 0-100.
+     * Silently ignored when the script is not running.
+     */
+    private void sendLampCommand(String command) {
+        if (senseHatWriter == null) return;
+        try {
+            senseHatWriter.write(command);
+            senseHatWriter.newLine();
+            senseHatWriter.flush();
+        } catch (IOException e) {
+            System.err.println("[Luminaire] Failed to send lamp command: " + e.getMessage());
+            senseHatWriter = null;
+        }
     }
 
     @Override
@@ -137,11 +236,12 @@ public class Luminaire extends BaseInstanceEnabler {
     private synchronized void setPower(boolean value) {
 	if (vPower != value) {
 	    vPower = value;
-	    //
-	    // 2IMN15:  TODO  :  fill in
-	    //
-	    // RoomControl has change the power.
-	    // Update the UI.
+	    // 2IMN15: Update Sense HAT LED matrix to reflect new power state.
+	    if (vPower) {
+		sendLampCommand("on " + vDimLevel);
+	    } else {
+		sendLampCommand("off");
+	    }
 	    fireResourceChange(RES_POWER);
 	}
     }
@@ -163,11 +263,10 @@ public class Luminaire extends BaseInstanceEnabler {
     private synchronized void setDimLevel(long value) {
 	if (vDimLevel != value) {
 	    vDimLevel = value;
-	    //
-	    // 2IMN15:  TODO  :  fill in
-	    //
-	    // RoomControl has change the dim level.
-	    // Update the UI.
+	    // 2IMN15: Update Sense HAT LED matrix to reflect new dim level (only if powered on).
+	    if (vPower) {
+		sendLampCommand("on " + vDimLevel);
+	    }
 	    fireResourceChange(RES_DIM_LEVEL);
 	}
     }
