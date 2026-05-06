@@ -6,7 +6,9 @@ package org.course;
 
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -33,21 +35,24 @@ public class RoomControl {
     //
     private static LeshanServer lwServer;
 
-    //
-    // 2IMN15:  TODO  : fill in
-    //
-    // Declare variables to keep track of the state of the room.
-    //
-    
+    // Room state: registered luminaires and their peak powers.
+    private static final List<Registration> luminaires = new ArrayList<>();
+    private static final Map<String, Long> luminairePeakPowers = new HashMap<>();
+
+    // Current room state derived from observed resources.
+    private static boolean currentPresence = false;
+    private static int currentPowerBudget = 300; // default (watts)
+
     public static void Initialize(LeshanServer server)
     {
 	// Register the LWM2M server object for future use
 	lwServer = server;
 
-	// 2IMN15:  TODO  : fill in
-	//
-	// Initialize the state variables.
-
+	// Initialise state lists (in case Initialize is called more than once).
+	luminaires.clear();
+	luminairePeakPowers.clear();
+	currentPresence = false;
+	currentPowerBudget = 300;
     }
 
     //
@@ -56,6 +61,29 @@ public class RoomControl {
     // * set the dim level of all luminaires.
     // * set the power flag of all luminaires.
     // * show the status of the room.
+
+    /** Write the power flag to every registered luminaire. */
+    private static void setAllLuminairesPower(boolean power) {
+	for (Registration lum : luminaires) {
+	    writeBoolean(lum, Constants.LUMINAIRE_ID, 0, Constants.RES_POWER, power);
+	}
+    }
+
+    /**
+     * Compute and write the dim level to every registered luminaire.
+     * Each luminaire receives an equal share of currentPowerBudget.
+     * Dim level = min(100, fairShare * 100 / peakPower).
+     */
+    private static void setAllLuminairesDimLevel() {
+	int n = luminaires.size();
+	if (n == 0) return;
+	double fairShare = (double) currentPowerBudget / n;
+	for (Registration lum : luminaires) {
+	    long peakPower = luminairePeakPowers.getOrDefault(lum.getEndpoint(), 100L);
+	    int dimLevel = (peakPower > 0) ? (int) Math.min(100.0, (fairShare * 100.0) / peakPower) : 0;
+	    writeInteger(lum, Constants.LUMINAIRE_ID, 0, Constants.RES_DIM_LEVEL, dimLevel);
+	}
+    }
 
     
     public static void handleRegistration(Registration registration)
@@ -67,19 +95,38 @@ public class RoomControl {
         if (supportedObject.get(Constants.PRESENCE_DETECTOR_ID) != null) {
 	    System.out.println("Presence Detector");
 
-	    //
-	    // 2IMN15:  TODO  :  fill in
-	    //
-	    // Process the registration of a new Presence Detector.
+	    // Observe the presence resource so we get notifications on change.
+	    try {
+		ObserveRequest obRequest =
+		    new ObserveRequest(Constants.PRESENCE_DETECTOR_ID,
+				       0,
+				       Constants.RES_PRESENCE);
+		ObserveResponse coResponse = lwServer.send(registration, obRequest, 1000);
+		if (coResponse != null && coResponse.isSuccess()) {
+		    // Seed initial presence from the observe response.
+		    Object val = ((LwM2mResource) coResponse.getContent()).getValue();
+		    currentPresence = Boolean.TRUE.equals(val);
+		    System.out.println("Initial presence: " + currentPresence);
+		}
+	    } catch (Exception e) {
+		System.out.println("Observe request failed for Presence Detector: " + e.getMessage());
+	    }
+	    // Apply current presence to any already-registered luminaires.
+	    setAllLuminairesPower(currentPresence);
         }
 
         if (supportedObject.get(Constants.LUMINAIRE_ID) != null) {
 	    System.out.println("Luminaire");
 
-	    //
-	    // 2IMN15:  TODO  :  fill in
-	    //
-	    // Process the registration of a new Luminaire.
+	    luminaires.add(registration);
+	    // Read and cache the luminaire's peak power.
+	    long peakPower = readInteger(registration, Constants.LUMINAIRE_ID, 0, Constants.RES_PEAK_POWER);
+	    luminairePeakPowers.put(registration.getEndpoint(), peakPower);
+	    System.out.println("Luminaire peak power: " + peakPower + " W  endpoint: " + registration.getEndpoint());
+
+	    // Set initial power and dim level based on current room state.
+	    writeBoolean(registration, Constants.LUMINAIRE_ID, 0, Constants.RES_POWER, currentPresence);
+	    setAllLuminairesDimLevel();
         }
 
         if (supportedObject.get(Constants.DEMAND_RESPONSE_ID) != null) {
@@ -89,6 +136,10 @@ public class RoomControl {
 	    // on how handle a registration. 
 	    //
 	    int powerBudget = registerDemandResponse(registration);
+	    currentPowerBudget = powerBudget;
+	    if (currentPresence) {
+		setAllLuminairesDimLevel();
+	    }
         }
 
 	//  2IMN15: don't forget to update the other luminaires.
@@ -97,11 +148,10 @@ public class RoomControl {
 
     public static void handleDeregistration(Registration registration)
     {
-	//
-	// 2IMN15:  TODO  :  fill in
-	//
-	// The device identified by the given registration will
-	// disappear.  Update the state accordingly.
+	String endpoint = registration.getEndpoint();
+	luminaires.removeIf(r -> r.getEndpoint().equals(endpoint));
+	luminairePeakPowers.remove(endpoint);
+	System.out.println("Client deregistered: " + endpoint);
     }
     
     public static void handleObserveResponse(SingleObservation observation,
@@ -109,21 +159,30 @@ public class RoomControl {
 					     ObserveResponse response)
     {
         if (registration != null && observation != null && response != null) {
-	    //
-	    // 2IMN15:  TODO  :  fill in
-	    //
-	    // When the registration and observation are known,
-	    // process the value contained in the response.
-	    //
-	    // Useful methods:
-	    //    registration.getEndpoint()
-	    //    observation.getPath()
-	    
+	    LwM2mPath obsPath = observation.getPath();
 
-	    // For processing an update of the Demand Response object.
-	    // It contains some example code.
+	    // Presence resource changed → update all luminaire power states.
+	    if (obsPath.getObjectId() == Constants.PRESENCE_DETECTOR_ID
+		    && obsPath.getResourceId() == Constants.RES_PRESENCE) {
+		Object val = ((LwM2mResource) response.getContent()).getValue();
+		boolean newPresence = Boolean.TRUE.equals(val);
+		System.out.println("Presence changed to: " + newPresence);
+		currentPresence = newPresence;
+		setAllLuminairesPower(currentPresence);
+		if (currentPresence) {
+		    setAllLuminairesDimLevel();
+		}
+	    }
+
+	    // Power budget changed → update luminaire dim levels.
 	    int newPowerBudget = observedDemandResponse(observation, response);
-	    
+	    if (newPowerBudget != -1) {
+		System.out.println("Power budget changed to: " + newPowerBudget + " W");
+		currentPowerBudget = newPowerBudget;
+		if (currentPresence) {
+		    setAllLuminairesDimLevel();
+		}
+	    }
         }
     }
 

@@ -61,6 +61,83 @@ NOTE: the Java applications listen to network ports. Depending on your
       the communication. 
 
 
+=== Presence Detection Input Modes ===
+
+The PresenceDetector client chooses its input interface automatically:
+
+1. Sense HAT joystick (Raspberry Pi only)
+   When "sensehat_joystick.py" is found in the working directory AND the
+   sense-hat Python library is available, the Sense HAT joystick is used.
+   Press the centre/middle button of the joystick to toggle presence.
+
+2. Swing GUI button (desktop platforms: Mac, Windows, Linux with display)
+   A small window with a "Toggle Presence" button appears automatically
+   when no Sense HAT script is available but a graphical display is present.
+
+3. Timed auto-toggle (headless / CI fallback)
+   When neither a Sense HAT nor a graphical display is available, presence
+   is toggled automatically every 10 seconds.
+
+
+=== Running on Raspberry Pi with Sense HAT ===
+
+--- Prerequisites ---
+
+1. Java (JRE 11 or later):
+      sudo apt update
+      sudo apt install -y default-jre
+
+2. Python sense-hat library (usually pre-installed on Raspberry Pi OS):
+      sudo apt install -y sense-hat
+   If not available via apt, use pip:
+      pip3 install sense-hat
+
+--- Copy files to the Pi ---
+
+From your Mac/PC (replace <PI_IP> with the Pi's IP address, e.g. 10.30.32.227):
+
+   scp leshan-client-demo/target/leshan-client-demo-2.0.0-SNAPSHOT-jar-with-dependencies.jar \
+       pi@<PI_IP>:/home/pi/
+
+   scp sensehat_joystick.py  pi@<PI_IP>:/home/pi/
+
+--- Start the server on your Mac/PC ---
+
+   java -jar leshan-server-demo/target/leshan-server-demo-2.0.0-SNAPSHOT-jar-with-dependencies.jar
+
+Note your Mac/PC IP address (e.g. 10.30.51.20):
+   macOS: ipconfig getifaddr en0
+   Linux: hostname -I
+
+--- Start the PresenceDetector client on the Pi ---
+
+SSH into the Pi:
+   ssh pi@<PI_IP>
+
+Then run (replace <MAC_IP> with your server's IP):
+   cd /home/pi
+   java -jar leshan-client-demo-2.0.0-SNAPSHOT-jar-with-dependencies.jar \
+        -n presencePi -presence -u coap://<MAC_IP>:5683
+
+The client will print:
+   [PresenceDetector] Sense HAT joystick active. Press the middle (centre) button to toggle presence.
+
+--- Demo flow ---
+
+1. Open the Leshan Web UI at http://<MAC_IP>:8080/
+2. "presencePi" should appear in the client list.
+3. Press the Sense HAT middle button → presence toggles true/false.
+4. Luminaire clients (lum1, lum2 …) will turn on/off automatically.
+5. Change the Demand Response "Total Allowed Peak Room Power" value in the
+   UI → luminaire dim levels update automatically.
+
+--- Firewall notes ---
+
+On macOS you may be prompted to allow incoming network connections for Java.
+Click Allow.  If blocked, go to System Settings → Network → Firewall and
+allow Java, or temporarily disable the firewall for testing.
+
+
 === Modifications to Leshan ===
 
 For the 2IMN15 course, the following modifications were applied to
