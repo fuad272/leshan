@@ -149,7 +149,8 @@ public class PresenceDetector extends BaseInstanceEnabler {
             }
 
             // Background thread: read PRESS events from the Python script.
-            // Non-daemon so the shutdown hook has time to clean up before the thread ends.
+            // The shutdown hook sets running=false and destroys the process to
+            // unblock any blocking readLine(), allowing this thread to exit cleanly.
             inputThread = new Thread(() -> {
                 try {
                     String line;
