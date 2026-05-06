@@ -3,14 +3,22 @@
  ****************/
 package org.eclipse.leshan.client.demo;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Random;
-import java.util.List;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.Scanner;
 
 import org.eclipse.leshan.client.servers.ServerIdentity;
@@ -27,6 +35,7 @@ import org.eclipse.leshan.core.util.NamedThreadFactory;
 //
 // Some classes for creating a GUI.
 //
+import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JTextField;
 import javax.swing.JFrame;
@@ -54,23 +63,153 @@ public class PresenceDetector extends BaseInstanceEnabler {
     private boolean vPower = false;
     private boolean vPresence = false;
 
-    //
-    // 2IMN15:  TODO  :  fill in
-    //
-    // Add state variables for interaction with the user (GUI, CLI, sensor.)
-    
-    
+    // State for the input interface (Sense HAT, GUI, or timed fallback).
+    private volatile boolean running = true;
+    private Process senseHatProcess;
+    private Thread inputThread;
+    // GUI label updated to reflect the current presence value.
+    private JLabel presenceValueLabel;
+
     public PresenceDetector() {
-	//
-	// 2IMN15:  TODO  :  fill in
-	//
-	// Create an interface to enable presence detection
-	// Options:
-	// *  GUI     (see DemandResponse.java for an Swing/AWT example)
-	// *  external application
-	// *  ...
-	//
-	// Call "setPresence(bool)" to inform observers.
+        // 2IMN15: Determine which input interface to use:
+        //   1. Sense HAT joystick (Raspberry Pi with sensehat_joystick.py nearby)
+        //   2. Swing GUI toggle button (non-headless desktop platforms)
+        //   3. Timed auto-toggle (headless / CI fallback)
+        if (!startSenseHat()) {
+            if (!java.awt.GraphicsEnvironment.isHeadless()) {
+                startGuiToggle();
+            } else {
+                startTimedToggle();
+            }
+        }
+
+        // Ensure the background process/thread is cleaned up on JVM exit.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            running = false;
+            if (senseHatProcess != null) {
+                senseHatProcess.destroy();
+            }
+            if (inputThread != null) {
+                inputThread.interrupt();
+            }
+        }, "presence-shutdown"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Input interface helpers
+    // -----------------------------------------------------------------------
+
+    /**
+     * Try to start the Sense HAT Python helper script.
+     * Looks for "sensehat_joystick.py" in the current working directory.
+     * Returns true if the script started successfully and printed "READY".
+     */
+    private boolean startSenseHat() {
+        File script = new File("sensehat_joystick.py");
+        if (!script.exists()) {
+            return false;
+        }
+        try {
+            ProcessBuilder pb = new ProcessBuilder("python3", script.getAbsolutePath());
+            pb.redirectErrorStream(false);
+            senseHatProcess = pb.start();
+
+            final BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(senseHatProcess.getInputStream()));
+
+            // Wait up to 3 seconds for the READY signal.
+            ExecutorService exec = Executors.newSingleThreadExecutor();
+            Future<String> firstLine = exec.submit(reader::readLine);
+            exec.shutdown();
+
+            String ready;
+            try {
+                ready = firstLine.get(3, TimeUnit.SECONDS);
+            } catch (TimeoutException | ExecutionException | InterruptedException e) {
+                firstLine.cancel(true);
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+                return false;
+            }
+
+            if (!"READY".equals(ready)) {
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+                return false;
+            }
+
+            // Background thread: read PRESS events from the Python script.
+            inputThread = new Thread(() -> {
+                try {
+                    String line;
+                    while (running && (line = reader.readLine()) != null) {
+                        if ("PRESS".equals(line.trim())) {
+                            togglePresence();
+                        }
+                    }
+                } catch (IOException e) {
+                    if (running) {
+                        System.err.println("[PresenceDetector] Sense HAT reader ended: " + e.getMessage());
+                    }
+                }
+            }, "sensehat-reader");
+            inputThread.setDaemon(true);
+            inputThread.start();
+
+            System.out.println("[PresenceDetector] Sense HAT joystick active."
+                    + " Press the middle (centre) button to toggle presence.");
+            return true;
+
+        } catch (IOException e) {
+            System.err.println("[PresenceDetector] Could not start sensehat_joystick.py: " + e.getMessage());
+            if (senseHatProcess != null) {
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Create a minimal Swing GUI with a "Toggle Presence" button.
+     * Used on desktop platforms (Mac, Windows, Linux with display).
+     */
+    private void startGuiToggle() {
+        presenceValueLabel = new JLabel("ABSENT");
+        JButton toggleButton = new JButton("Toggle Presence");
+        toggleButton.addActionListener(e -> togglePresence());
+
+        JFrame guiFrame = new JFrame("Presence Detector");
+        guiFrame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        guiFrame.getContentPane().setLayout(new GridLayout(1, 2, 10, 10));
+        guiFrame.getContentPane().add(toggleButton);
+        guiFrame.getContentPane().add(presenceValueLabel);
+        guiFrame.pack();
+        guiFrame.setSize(300, 80);
+
+        EventQueue.invokeLater(() -> guiFrame.setVisible(true));
+        System.out.println("[PresenceDetector] GUI toggle active. Use the button to toggle presence.");
+    }
+
+    /**
+     * Fallback for headless environments: automatically toggle presence every
+     * 10 seconds so the LwM2M scenario can be observed without interaction.
+     */
+    private void startTimedToggle() {
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
+                new NamedThreadFactory("presence-toggle"));
+        scheduler.scheduleAtFixedRate(this::togglePresence, 5, 10, TimeUnit.SECONDS);
+        System.out.println("[PresenceDetector] Timed toggle active (auto-toggles every 10 s).");
+    }
+
+    /** Toggle the presence boolean and notify LwM2M observers. */
+    private synchronized void togglePresence() {
+        setPresence(!vPresence);
+        System.out.println("[PresenceDetector] Presence toggled to: " + vPresence);
+        if (presenceValueLabel != null) {
+            final String text = vPresence ? "PRESENT" : "ABSENT";
+            EventQueue.invokeLater(() -> presenceValueLabel.setText(text));
+        }
     }
 
     @Override
