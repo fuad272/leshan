@@ -67,6 +67,7 @@ public class PresenceDetector extends BaseInstanceEnabler {
     private volatile boolean running = true;
     private Process senseHatProcess;
     private Thread inputThread;
+    private ScheduledExecutorService timedToggleScheduler;
     // GUI label updated to reflect the current presence value.
     private JLabel presenceValueLabel;
 
@@ -86,6 +87,9 @@ public class PresenceDetector extends BaseInstanceEnabler {
         // Ensure the background process/thread is cleaned up on JVM exit.
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             running = false;
+            if (timedToggleScheduler != null) {
+                timedToggleScheduler.shutdownNow();
+            }
             if (senseHatProcess != null) {
                 senseHatProcess.destroy();
             }
@@ -125,7 +129,13 @@ public class PresenceDetector extends BaseInstanceEnabler {
             String ready;
             try {
                 ready = firstLine.get(3, TimeUnit.SECONDS);
-            } catch (TimeoutException | ExecutionException | InterruptedException e) {
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                firstLine.cancel(true);
+                senseHatProcess.destroy();
+                senseHatProcess = null;
+                return false;
+            } catch (TimeoutException | ExecutionException e) {
                 firstLine.cancel(true);
                 senseHatProcess.destroy();
                 senseHatProcess = null;
@@ -139,6 +149,7 @@ public class PresenceDetector extends BaseInstanceEnabler {
             }
 
             // Background thread: read PRESS events from the Python script.
+            // Non-daemon so the shutdown hook has time to clean up before the thread ends.
             inputThread = new Thread(() -> {
                 try {
                     String line;
@@ -153,7 +164,6 @@ public class PresenceDetector extends BaseInstanceEnabler {
                     }
                 }
             }, "sensehat-reader");
-            inputThread.setDaemon(true);
             inputThread.start();
 
             System.out.println("[PresenceDetector] Sense HAT joystick active."
@@ -196,9 +206,9 @@ public class PresenceDetector extends BaseInstanceEnabler {
      * 10 seconds so the LwM2M scenario can be observed without interaction.
      */
     private void startTimedToggle() {
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
+        timedToggleScheduler = Executors.newSingleThreadScheduledExecutor(
                 new NamedThreadFactory("presence-toggle"));
-        scheduler.scheduleAtFixedRate(this::togglePresence, 5, 10, TimeUnit.SECONDS);
+        timedToggleScheduler.scheduleAtFixedRate(this::togglePresence, 5, 10, TimeUnit.SECONDS);
         System.out.println("[PresenceDetector] Timed toggle active (auto-toggles every 10 s).");
     }
 

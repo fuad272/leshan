@@ -80,7 +80,7 @@ public class RoomControl {
 	int fairShare = currentPowerBudget / n;
 	for (Registration lum : luminaires) {
 	    long peakPower = luminairePeakPowers.getOrDefault(lum.getEndpoint(), 100L);
-	    int dimLevel = (peakPower > 0) ? (int) Math.min(100, fairShare * 100L / peakPower) : 0;
+	    int dimLevel = (peakPower > 0) ? (int) Math.min(100.0, (fairShare * 100.0) / peakPower) : 0;
 	    writeInteger(lum, Constants.LUMINAIRE_ID, 0, Constants.RES_DIM_LEVEL, dimLevel);
 	}
     }
