@@ -283,9 +283,15 @@ public class PresenceDetector extends BaseInstanceEnabler {
             return;
         }
         try {
-            new ProcessBuilder("python3", script.getAbsolutePath(), showHeart ? "heart" : "clear").start();
+            Process process = new ProcessBuilder("python3", script.getAbsolutePath(), showHeart ? "heart" : "clear")
+                    .start();
+            if (!process.waitFor(2, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+            }
         } catch (IOException e) {
             // Ignore Sense HAT display errors to keep non-Pi fallback behavior.
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
