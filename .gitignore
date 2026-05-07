@@ -10,6 +10,8 @@ leshan-core/ddffiles
 
 # Binary files #
 *.class
+*.pyc
+__pycache__/
 
 # Maven build files #
 target

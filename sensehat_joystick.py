@@ -2,10 +2,11 @@
 """
 Sense HAT joystick reader for PresenceDetector.
 
-Prints "READY" to stdout when ready, then prints "PRESS" each time the
-joystick middle (center) button is pressed.  Place this file next to the
-leshan-client-demo jar (or in the working directory) when running on a
-Raspberry Pi with a Sense HAT attached.
+Prints "READY" to stdout when ready, then prints:
+  - "MIDDLE_PRESS" when the joystick centre/middle button is pressed
+  - "MOVE" when the joystick is pressed in up/down/left/right direction
+Place this file next to the leshan-client-demo jar (or in the working
+directory) when running on a Raspberry Pi with a Sense HAT attached.
 
 Usage (Java invokes this automatically via ProcessBuilder):
     python3 sensehat_joystick.py
@@ -27,6 +28,11 @@ print("READY", flush=True)
 
 while True:
     event = sense.stick.wait_for_event()
-    # Only react to the centre/middle button being pressed (not held/released).
-    if event.direction == "middle" and event.action == "pressed":
-        print("PRESS", flush=True)
+    # React to press events only (ignore held/released).
+    if event.action != "pressed":
+        continue
+
+    if event.direction == "middle":
+        print("MIDDLE_PRESS", flush=True)
+    elif event.direction in ("up", "down", "left", "right"):
+        print("MOVE", flush=True)
