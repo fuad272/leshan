@@ -143,6 +143,28 @@ The client will print:
    UI → luminaire dim levels update automatically and the LED brightness
    changes accordingly.
 
+--- Equal-share dimming with multiple luminaires ---
+
+When N luminaires are registered, each gets an equal watt share of the
+room's power budget (B watts):
+
+    shareW  = B / N                          (double division)
+    dim%    = min(100, floor(shareW / peakW * 100))
+
+where peakW is the luminaire's own Peak Power resource (RES_PEAK_POWER).
+If peakW is 0 or not cached, dim% is set to 0.
+
+Examples (B = 100 W):
+  N=1, peakW=100 W  → shareW=100 W → dim=100 %
+  N=2, peakW=100 W  → shareW= 50 W → dim= 50 %
+  N=4, peakW=100 W  → shareW= 25 W → dim= 25 %
+  N=2, peakW= 60 W  → shareW= 50 W → dim= 83 %
+
+Dim levels are recomputed automatically whenever:
+  - A luminaire registers or deregisters.
+  - The DemandResponse "Total Allowed Peak Room Power" changes.
+  - Presence switches to ON (so new levels apply immediately).
+
 --- Start the Luminaire client on the Pi ---
 
 SSH into the Pi and run (replace <MAC_IP> with your server's IP):
