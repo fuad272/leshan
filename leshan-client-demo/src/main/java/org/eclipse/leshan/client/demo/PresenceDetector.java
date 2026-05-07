@@ -226,6 +226,7 @@ public class PresenceDetector extends BaseInstanceEnabler {
     private synchronized void togglePresence() {
         manualOn = !manualOn;
         if (manualOn) {
+            // Manual ON overrides motion mode; show normal lamp output only.
             motionActive = false;
         }
         cancelMotionTimeout();
@@ -281,7 +282,7 @@ public class PresenceDetector extends BaseInstanceEnabler {
                 motionModeMarker.delete();
             }
         } catch (IOException e) {
-            // Ignore marker file errors to keep non-Pi fallback behavior.
+            System.err.println("[PresenceDetector] Could not update .motion_mode marker: " + e.getMessage());
         }
     }
 
