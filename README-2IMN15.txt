@@ -69,11 +69,13 @@ The PresenceDetector client chooses its input interface automatically:
    When "sensehat_joystick.py" is found in the working directory AND the
    sense-hat Python library is available, the Sense HAT joystick is used.
    - Press the centre/middle button to manually toggle presence ON/OFF.
+     Manual ON stays ON until middle is pressed again.
    - Press up/down/left/right to simulate motion detection:
      presence turns ON and automatically turns OFF after 3 seconds without
      further movement (movement resets the 3-second timer).
-   - During motion-triggered ON state, a heart is shown on the Sense HAT
-     LED matrix (requires "sensehat_display.py" in the working directory).
+   - Motion display is ignored while manual ON is active.
+   - During motion-triggered ON state (manual OFF), Luminaire shows a heart
+     on the Sense HAT LED matrix.
 
 2. Swing GUI button (desktop platforms: Mac, Windows, Linux with display)
    A small window with a "Toggle Presence" button appears automatically
@@ -105,7 +107,6 @@ From your Mac/PC (replace <PI_IP> with the Pi's IP address, e.g. 10.30.32.227):
        pi@<PI_IP>:/home/pi/
 
    scp sensehat_joystick.py  pi@<PI_IP>:/home/pi/
-   scp sensehat_display.py   pi@<PI_IP>:/home/pi/
    scp sensehat_lamp.py      pi@<PI_IP>:/home/pi/
 
 --- Start the server on your Mac/PC ---
@@ -134,9 +135,10 @@ The client will print:
 1. Open the Leshan Web UI at http://<MAC_IP>:8080/
 2. "presencePi" should appear in the client list.
 3. Press the Sense HAT middle button → presence toggles true/false.
-   Press up/down/left/right → presence turns true for 3 seconds after last movement.
+   Press up/down/left/right (while manual OFF) → presence turns true for 3 seconds after last movement.
 4. Luminaire clients (lum1, lum2 …) will turn on/off automatically,
    and the Sense HAT LED matrix on the Pi will light up/dim/turn off.
+   In motion-only mode, the LED matrix shows a heart for 3 seconds.
 5. Change the Demand Response "Total Allowed Peak Room Power" value in the
    UI → luminaire dim levels update automatically and the LED brightness
    changes accordingly.
@@ -152,9 +154,13 @@ SSH into the Pi and run (replace <MAC_IP> with your server's IP):
 When sensehat_lamp.py is present in the working directory and the
 sense-hat Python library is installed, the Sense HAT LED matrix will
 automatically reflect the luminaire state:
-  - Power ON  → full 8x8 matrix lit at the current dim brightness.
+  - Power ON with ".motion_mode" marker present → heart shown at current dim brightness.
+  - Power ON without ".motion_mode" marker → full 8x8 matrix lit at the current dim brightness.
   - Power OFF → matrix cleared.
   - Dim level changed while ON → matrix brightness updated (0 = dark, 100 = full white).
+
+The ".motion_mode" marker file is internal coordination between PresenceDetector
+and Luminaire. Do not create it manually.
 
 --- Firewall notes ---
 

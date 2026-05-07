@@ -70,6 +70,7 @@ public class Luminaire extends BaseInstanceEnabler {
     // Sense HAT lamp process (null when not running on a Pi with the script).
     private Process senseHatProcess;
     private BufferedWriter senseHatWriter;
+    private final File motionModeMarker = new File(".motion_mode");
 
     public Luminaire() {
         // 2IMN15: Start Sense HAT LED controller if the helper script is present.
@@ -143,13 +144,6 @@ public class Luminaire extends BaseInstanceEnabler {
             drainer.setDaemon(true);
             drainer.start();
 
-            if (!"READY".equals(ready)) {
-                senseHatProcess.destroy();
-                senseHatProcess = null;
-                System.err.println("[Luminaire] Sense HAT script sent unexpected first line: " + ready);
-                return;
-            }
-
             senseHatWriter = new BufferedWriter(
                     new OutputStreamWriter(senseHatProcess.getOutputStream()));
             System.out.println("[Luminaire] Sense HAT LED matrix active.");
@@ -165,7 +159,7 @@ public class Luminaire extends BaseInstanceEnabler {
 
     /**
      * Send a command to the Sense HAT lamp script.
-     * Commands: "off", "on <dim>" where dim is 0-100.
+     * Commands: "off", "on <dim>", "heart <dim>" where dim is 0-100.
      * Silently ignored when the script is not running.
      */
     private void sendLampCommand(String command) {
@@ -194,6 +188,13 @@ public class Luminaire extends BaseInstanceEnabler {
 	default:
 	    return super.read(identity, resourceId);
 	}
+    }
+
+    private String buildLampOnCommand() {
+        if (motionModeMarker.exists()) {
+            return "heart " + vDimLevel;
+        }
+        return "on " + vDimLevel;
     }
     
     @Override
@@ -238,7 +239,7 @@ public class Luminaire extends BaseInstanceEnabler {
 	    vPower = value;
 	    // 2IMN15: Update Sense HAT LED matrix to reflect new power state.
 	    if (vPower) {
-		sendLampCommand("on " + vDimLevel);
+		sendLampCommand(buildLampOnCommand());
 	    } else {
 		sendLampCommand("off");
 	    }
@@ -265,7 +266,7 @@ public class Luminaire extends BaseInstanceEnabler {
 	    vDimLevel = value;
 	    // 2IMN15: Update Sense HAT LED matrix to reflect new dim level (only if powered on).
 	    if (vPower) {
-		sendLampCommand("on " + vDimLevel);
+		sendLampCommand(buildLampOnCommand());
 	    }
 	    fireResourceChange(RES_DIM_LEVEL);
 	}
