@@ -276,7 +276,9 @@ public class PresenceDetector extends BaseInstanceEnabler {
         try {
             if (enabled) {
                 if (!motionModeMarker.exists()) {
-                    motionModeMarker.createNewFile();
+                    if (!motionModeMarker.createNewFile()) {
+                        System.err.println("[PresenceDetector] Could not create .motion_mode marker.");
+                    }
                 }
             } else if (motionModeMarker.exists()) {
                 motionModeMarker.delete();

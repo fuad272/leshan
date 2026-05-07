@@ -160,7 +160,8 @@ automatically reflect the luminaire state:
   - Dim level changed while ON → matrix brightness updated (0 = dark, 100 = full white).
 
 The ".motion_mode" marker file is internal coordination between PresenceDetector
-and Luminaire. Do not create it manually.
+and Luminaire. It is created in the working directory. Do not create it manually.
+If a process exits unexpectedly and leaves it behind, it is safe to delete.
 
 --- Firewall notes ---
 
