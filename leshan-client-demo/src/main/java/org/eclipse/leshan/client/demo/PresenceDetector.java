@@ -241,6 +241,7 @@ public class PresenceDetector extends BaseInstanceEnabler {
 
     /** Handle motion-like joystick movement events (up/down/left/right). */
     private synchronized void onMovementDetected() {
+        // Keep manual ON purely manual: motion must not start an auto-off timer.
         if (presenceMode == PresenceMode.MANUAL && vPresence) {
             return;
         }
@@ -337,10 +338,10 @@ public class PresenceDetector extends BaseInstanceEnabler {
 	if (vPresence != value) {
 	    vPresence = value;
 	    fireResourceChange(RES_PRESENCE);
-            if (presenceValueLabel != null) {
-                final String text = vPresence ? "PRESENT" : "ABSENT";
-                EventQueue.invokeLater(() -> presenceValueLabel.setText(text));
-            }
+	    if (presenceValueLabel != null) {
+		final String text = vPresence ? "PRESENT" : "ABSENT";
+		EventQueue.invokeLater(() -> presenceValueLabel.setText(text));
+	    }
 	}
     }
     
