@@ -79,7 +79,7 @@ public class RoomControl {
 	if (n == 0) return;
 	double fairShare = (double) currentPowerBudget / n;
 	for (Registration lum : luminaires) {
-	    long peakPower = luminairePeakPowers.getOrDefault(lum.getEndpoint(), 100L);
+	    long peakPower = luminairePeakPowers.getOrDefault(lum.getEndpoint(), 0L);
 	    int dimLevel = (peakPower > 0) ? (int) Math.min(100.0, (fairShare * 100.0) / peakPower) : 0;
 	    writeInteger(lum, Constants.LUMINAIRE_ID, 0, Constants.RES_DIM_LEVEL, dimLevel);
 	}
@@ -152,6 +152,8 @@ public class RoomControl {
 	luminaires.removeIf(r -> r.getEndpoint().equals(endpoint));
 	luminairePeakPowers.remove(endpoint);
 	System.out.println("Client deregistered: " + endpoint);
+	// Recompute dim levels for remaining luminaires now that N has changed.
+	setAllLuminairesDimLevel();
     }
     
     public static void handleObserveResponse(SingleObservation observation,
