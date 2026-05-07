@@ -7,11 +7,8 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -20,7 +17,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.Scanner;
 
 import org.eclipse.leshan.client.servers.ServerIdentity;
 import org.eclipse.leshan.client.resource.BaseInstanceEnabler;
@@ -71,15 +67,12 @@ public class PresenceDetector extends BaseInstanceEnabler {
     private ScheduledExecutorService timedToggleScheduler;
     private ScheduledExecutorService motionTimeoutScheduler;
     private ScheduledFuture<?> motionTimeoutFuture;
-    private PresenceMode presenceMode = PresenceMode.NONE;
+    private boolean manualOn = false;
+    private boolean motionActive = false;
     private static final long MOTION_TIMEOUT_SECONDS = 3L;
+    private final File motionModeMarker = new File(".motion_mode");
     // GUI label updated to reflect the current presence value.
     private JLabel presenceValueLabel;
-    private enum PresenceMode {
-        NONE,
-        MANUAL,
-        MOTION
-    }
 
     public PresenceDetector() {
         // 2IMN15: Determine which input interface to use:
@@ -231,23 +224,23 @@ public class PresenceDetector extends BaseInstanceEnabler {
 
     /** Toggle the presence boolean and notify LwM2M observers. */
     private synchronized void togglePresence() {
+        manualOn = !manualOn;
+        if (manualOn) {
+            // Manual ON overrides motion mode; show normal lamp output only.
+            motionActive = false;
+        }
         cancelMotionTimeout();
-        boolean next = !vPresence;
-        presenceMode = next ? PresenceMode.MANUAL : PresenceMode.NONE;
-        setPresence(next);
-        updateSenseHatHeart(false);
-        System.out.println("[PresenceDetector] Presence toggled to: " + vPresence);
+        updatePresenceAndMotionMode();
+        System.out.println("[PresenceDetector] Manual presence toggled to: " + manualOn + ", effective presence: " + vPresence);
     }
 
     /** Handle motion-like joystick movement events (up/down/left/right). */
     private synchronized void onMovementDetected() {
-        // Keep manual ON purely manual: motion must not start an auto-off timer.
-        if (presenceMode == PresenceMode.MANUAL && vPresence) {
+        if (manualOn) {
             return;
         }
-        presenceMode = PresenceMode.MOTION;
-        setPresence(true);
-        updateSenseHatHeart(true);
+        motionActive = true;
+        updatePresenceAndMotionMode();
         scheduleMotionTimeout();
     }
 
@@ -261,11 +254,8 @@ public class PresenceDetector extends BaseInstanceEnabler {
         }
         motionTimeoutFuture = motionTimeoutScheduler.schedule(() -> {
             synchronized (PresenceDetector.this) {
-                if (presenceMode == PresenceMode.MOTION) {
-                    presenceMode = PresenceMode.NONE;
-                    setPresence(false);
-                    updateSenseHatHeart(false);
-                }
+                motionActive = false;
+                updatePresenceAndMotionMode();
             }
         }, MOTION_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     }
@@ -277,21 +267,24 @@ public class PresenceDetector extends BaseInstanceEnabler {
         }
     }
 
-    private void updateSenseHatHeart(boolean showHeart) {
-        File script = new File("sensehat_display.py");
-        if (!script.exists()) {
-            return;
-        }
+    private void updatePresenceAndMotionMode() {
+        setPresence(manualOn || motionActive);
+        setMotionModeMarker(motionActive && !manualOn);
+    }
+
+    private void setMotionModeMarker(boolean enabled) {
         try {
-            Process process = new ProcessBuilder("python3", script.getAbsolutePath(), showHeart ? "heart" : "clear")
-                    .start();
-            if (!process.waitFor(2, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
+            if (enabled) {
+                if (!motionModeMarker.exists()) {
+                    if (!motionModeMarker.createNewFile()) {
+                        System.err.println("[PresenceDetector] Could not create .motion_mode marker.");
+                    }
+                }
+            } else if (motionModeMarker.exists()) {
+                motionModeMarker.delete();
             }
         } catch (IOException e) {
-            // Ignore Sense HAT display errors to keep non-Pi fallback behavior.
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+            System.err.println("[PresenceDetector] Could not update .motion_mode marker: " + e.getMessage());
         }
     }
 
